@@ -181,6 +181,7 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
   pid_t pid;
   int flags;
   int *pid_map = NULL;
+  int redir_in = -1, redir_out = -1, redir_err = -1;
 
   uv__handle_init(loop, (uv_handle_t*)process, UV_PROCESS);
   loop->counters.process_init++;
@@ -284,8 +285,6 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
     }
 
     if (options.detached) {
-      setsid();
-      umask(027);
       pid = fork();
       if (pid < 0) {
         perror("Second fork()");
@@ -293,11 +292,31 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
       } else if (pid > 0) {
         /* First child saves the pid of the second child and exits. */
         pid_map[0] = pid;
-        exit(0);
+        _exit(0);
       }
       /* Second child continues below */
+      if (setsid() == -1) {
+        perror("setsid()");
+        _exit(errno);
+      }
+      umask(022);
+      /* This would be a great place to redirect to files instead. */
+      redir_in = open("/dev/null", O_RDONLY);
+      redir_out = open("/dev/null", O_RDWR);
+      redir_err = open("/dev/null", O_RDWR);
+      if (dup2(redir_in, STDIN_FILENO) < 0) {
+        perror("stdin redirect");
+        _exit(errno);
+      }
+      if (dup2(redir_out, STDOUT_FILENO) < 0) {
+        perror("stdout redirect");
+        _exit(errno);
+      }
+      if (dup2(redir_err, STDERR_FILENO) < 0) {
+        perror("stderr redirect");
+        _exit(errno);
+      }
     }
-
     if (options.cwd && chdir(options.cwd)) {
       perror("chdir()");
       _exit(127);
