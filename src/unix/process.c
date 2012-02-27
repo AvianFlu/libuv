@@ -181,6 +181,7 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
   pid_t pid;
   int flags;
   int *pid_map = NULL;
+  int redir_in = -1, redir_out = -1, redir_err = -1;
 
   uv__handle_init(loop, (uv_handle_t*)process, UV_PROCESS);
   loop->counters.process_init++;
@@ -284,8 +285,6 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
     }
 
     if (options.detached) {
-      setsid();
-      umask(027);
       pid = fork();
       if (pid < 0) {
         perror("Second fork()");
@@ -293,9 +292,52 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
       } else if (pid > 0) {
         /* First child saves the pid of the second child and exits. */
         pid_map[0] = pid;
-        exit(0);
+        _exit(0);
       }
       /* Second child continues below */
+      if (setsid() == -1) {
+        perror("setsid()");
+        _exit(errno);
+      }
+      umask(022);
+    }
+
+    if (options.detached || options.stdout_file || options.stderr_file) {
+      if (options.stdout_file == NULL) {
+        options.stdout_file = "/dev/null";
+        options.stderr_file = "/dev/null";
+      } else if (options.stderr_file == NULL) {
+        options.stderr_file = options.stdout_file;
+      }
+      redir_out = open(options.stdout_file, O_WRONLY | O_APPEND | O_CREAT, 0640);
+      if (redir_out == -1) {
+        perror("open(), stdout");
+        _exit(errno);
+      }
+      if (options.stderr_file != NULL) {
+        redir_err = open(options.stderr_file, O_WRONLY | O_APPEND | O_CREAT, 0640);
+        if (redir_err == -1) {
+          perror("open(), stderr");
+          _exit(errno);
+        }
+      } else {
+        redir_err = redir_out;
+      }
+      if (options.detached) {
+        redir_in = open("/dev/null", O_RDONLY);
+        if (dup2(redir_in, STDIN_FILENO) < 0) {
+          perror("dup2(), stdin");
+          _exit(errno);
+        }
+      }
+      if (dup2(redir_out, STDOUT_FILENO) < 0) {
+        perror("dup2(), stdout");
+        _exit(errno);
+      }
+      if (dup2(redir_err, STDERR_FILENO) < 0) {
+        perror("dup2(), stderr");
+        _exit(errno);
+      }
     }
 
     if (options.cwd && chdir(options.cwd)) {
