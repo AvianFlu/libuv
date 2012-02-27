@@ -1070,6 +1070,15 @@ typedef struct uv_process_options_s {
   int detached;
 
   /*
+   * If non-NULL, these will be used as file paths to redirect the given stdio
+   * streams to.  If only options.stdout_file is set, it will be used for
+   * both.
+   */
+
+  char* stdout_file;
+  char* stderr_file;
+
+  /*
    * TODO describe how this works.
    */
   int windows_verbatim_arguments;
