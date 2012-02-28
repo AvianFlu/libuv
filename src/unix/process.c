@@ -25,6 +25,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include <fcntl.h> /* O_CLOEXEC, O_NONBLOCK */
 #include <poll.h>
 #include <unistd.h>
@@ -37,6 +38,11 @@
 extern char **environ;
 #endif
 
+#ifndef  MAP_ANONYMOUS
+#ifdef MAP_ANON
+#define MAP_ANONYMOUS MAP_ANON
+#endif
+#endif
 
 static void uv__chld(EV_P_ ev_child* watcher, int revents) {
   int status = watcher->rstatus;
@@ -153,7 +159,6 @@ static int uv__process_init_pipe(uv_pipe_t* handle, int fds[2], int flags) {
     return uv__make_pipe(fds, flags);
 }
 
-
 #ifndef SPAWN_WAIT_EXEC
 # define SPAWN_WAIT_EXEC 1
 #endif
@@ -175,26 +180,45 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
   int status;
   pid_t pid;
   int flags;
+  int *pid_map = NULL;
+  int redir_in = -1, redir_out = -1, redir_err = -1;
 
   uv__handle_init(loop, (uv_handle_t*)process, UV_PROCESS);
   loop->counters.process_init++;
 
   process->exit_cb = options.exit_cb;
 
-  if (options.stdin_stream &&
-      uv__process_init_pipe(options.stdin_stream, stdin_pipe, 0)) {
-    goto error;
+  if (options.detached) {
+    pid_map = mmap(0, sizeof(pid_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (pid_map == MAP_FAILED) {
+      goto error;
+    }
+    if (options.stdin_stream) {
+      uv_close((uv_handle_t*)options.stdin_stream, NULL);
+    }
+    if (options.stdout_stream) {
+      uv_close((uv_handle_t*)options.stdout_stream, NULL);
+    }
+    if (options.stderr_stream) {
+      uv_close((uv_handle_t*)options.stderr_stream, NULL);
+    }
+  } else {
+    if (options.stdin_stream &&
+        uv__process_init_pipe(options.stdin_stream, stdin_pipe, 0)) {
+      goto error;
+    }
+
+    if (options.stdout_stream &&
+        uv__process_init_pipe(options.stdout_stream, stdout_pipe, 0)) {
+      goto error;
+    }
+
+    if (options.stderr_stream &&
+        uv__process_init_pipe(options.stderr_stream, stderr_pipe, 0)) {
+      goto error;
+    }
   }
 
-  if (options.stdout_stream &&
-      uv__process_init_pipe(options.stdout_stream, stdout_pipe, 0)) {
-    goto error;
-  }
-
-  if (options.stderr_stream &&
-      uv__process_init_pipe(options.stderr_stream, stderr_pipe, 0)) {
-    goto error;
-  }
 
   /* This pipe is used by the parent to wait until
    * the child has called `execve()`. We need this
@@ -260,6 +284,38 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
       uv__nonblock(STDERR_FILENO, 0);
     }
 
+    if (options.detached) {
+      pid = fork();
+      if (pid < 0) {
+        perror("Second fork()");
+        _exit(errno);
+      } else if (pid > 0) {
+        /* First child saves the pid of the second child and exits. */
+        pid_map[0] = pid;
+        _exit(0);
+      }
+      /* Second child continues below */
+      if (setsid() == -1) {
+        perror("setsid()");
+        _exit(errno);
+      }
+      umask(022);
+      redir_in = open("/dev/null", O_RDONLY);
+      redir_out = open("/dev/null", O_RDWR);
+      redir_err = open("/dev/null", O_RDWR);
+      if (dup2(redir_in, STDIN_FILENO) < 0) {
+        perror("stdin redirect");
+        _exit(errno);
+      }
+      if (dup2(redir_out, STDOUT_FILENO) < 0) {
+        perror("stdout redirect");
+        _exit(errno);
+      }
+      if (dup2(redir_err, STDERR_FILENO) < 0) {
+        perror("stderr redirect");
+        _exit(errno);
+      }
+    }
     if (options.cwd && chdir(options.cwd)) {
       perror("chdir()");
       _exit(127);
@@ -293,7 +349,14 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
   uv__close(signal_pipe[0]);
 #endif
 
-  process->pid = pid;
+  if (options.detached) {
+    process->pid = pid_map[0];
+    if (munmap(pid_map, sizeof(pid_t)) != 0) {
+      goto error;
+    }
+  } else {
+    process->pid = pid;
+  }
 
   ev_child_init(&process->child_watcher, uv__chld, pid, 0);
   ev_child_start(process->loop->ev, &process->child_watcher);
