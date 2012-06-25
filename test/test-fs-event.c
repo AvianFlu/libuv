@@ -38,6 +38,27 @@ static int close_cb_called = 0;
 static int fs_event_cb_called = 0;
 static int timer_cb_touch_called = 0;
 
+static void cleanup_watch_dir() {
+  uv_loop_t* loop = uv_default_loop();
+  uv_fs_t readdir_req;
+  uv_fs_t unlink_req;
+  int i, r;
+  char *buffer, *name;
+
+  r = uv_fs_readdir(loop, &readdir_req, "watch_dir", 0, NULL);
+  buffer = readdir_req.ptr;
+  uv_chdir("watch_dir");
+  for (i = 0; i < readdir_req.result; i++) {
+    name = buffer;
+    r = remove(name);
+    ASSERT(r == 0);
+    buffer += strlen(name) + 1;
+  }
+  uv_chdir("..");
+  r = remove("watch_dir");
+  ASSERT(r == 0 || uv_last_error(loop).code == UV_ENOENT);
+}
+
 static void create_dir(uv_loop_t* loop, const char* name) {
   int r;
   uv_fs_t req;
@@ -165,9 +186,7 @@ TEST_IMPL(fs_event_watch_dir) {
   int r;
 
   /* Setup */
-  uv_fs_unlink(loop, &fs_req, "watch_dir/file1", NULL);
-  uv_fs_unlink(loop, &fs_req, "watch_dir/file2", NULL);
-  uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
+  cleanup_watch_dir();
   create_dir(loop, "watch_dir");
 
   r = uv_fs_event_init(loop, &fs_event, "watch_dir", fs_event_cb_dir, 0);
@@ -184,10 +203,7 @@ TEST_IMPL(fs_event_watch_dir) {
   ASSERT(close_cb_called == 2);
 
   /* Cleanup */
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file1", NULL);
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file2", NULL);
-  r = uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
-
+  cleanup_watch_dir();
   return 0;
 }
 
@@ -197,9 +213,6 @@ TEST_IMPL(fs_event_watch_file) {
   int r;
 
   /* Setup */
-  uv_fs_unlink(loop, &fs_req, "watch_dir/file1", NULL);
-  uv_fs_unlink(loop, &fs_req, "watch_dir/file2", NULL);
-  uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
   create_dir(loop, "watch_dir");
   create_file(loop, "watch_dir/file1");
   create_file(loop, "watch_dir/file2");
@@ -218,10 +231,7 @@ TEST_IMPL(fs_event_watch_file) {
   ASSERT(close_cb_called == 2);
 
   /* Cleanup */
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file1", NULL);
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file2", NULL);
-  r = uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
-
+  cleanup_watch_dir();
   return 0;
 }
 
@@ -269,8 +279,7 @@ TEST_IMPL(fs_event_no_callback_on_close) {
   int r;
 
   /* Setup */
-  uv_fs_unlink(loop, &fs_req, "watch_dir/file1", NULL);
-  uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
+  cleanup_watch_dir();
   create_dir(loop, "watch_dir");
   create_file(loop, "watch_dir/file1");
 
@@ -289,8 +298,7 @@ TEST_IMPL(fs_event_no_callback_on_close) {
   ASSERT(close_cb_called == 1);
 
   /* Cleanup */
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file1", NULL);
-  r = uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
+  cleanup_watch_dir();
 
   return 0;
 }
@@ -343,6 +351,8 @@ TEST_IMPL(fs_event_close_with_pending_event) {
 
   loop = uv_default_loop();
 
+  cleanup_watch_dir();
+
   create_dir(loop, "watch_dir");
   create_file(loop, "watch_dir/file");
 
@@ -359,10 +369,7 @@ TEST_IMPL(fs_event_close_with_pending_event) {
   ASSERT(close_cb_called == 1);
 
   /* Clean up */
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file", NULL);
-  ASSERT(r == 0);
-  r = uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
-  ASSERT(r == 0);
+  cleanup_watch_dir();
 
   return 0;
 }
@@ -400,6 +407,8 @@ TEST_IMPL(fs_event_close_in_callback) {
 
   loop = uv_default_loop();
 
+  cleanup_watch_dir();
+
   create_dir(loop, "watch_dir");
   create_file(loop, "watch_dir/file1");
   create_file(loop, "watch_dir/file2");
@@ -423,18 +432,7 @@ TEST_IMPL(fs_event_close_in_callback) {
   ASSERT(fs_event_cb_called == 3);
 
   /* Clean up */
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file1", NULL);
-  ASSERT(r == 0);
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file2", NULL);
-  ASSERT(r == 0);
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file3", NULL);
-  ASSERT(r == 0);
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file4", NULL);
-  ASSERT(r == 0);
-  r = uv_fs_unlink(loop, &fs_req, "watch_dir/file5", NULL);
-  ASSERT(r == 0);
-  r = uv_fs_rmdir(loop, &fs_req, "watch_dir", NULL);
-  ASSERT(r == 0);
+  cleanup_watch_dir();
 
   return 0;
 }
