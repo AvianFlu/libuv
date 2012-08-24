@@ -759,6 +759,7 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
 
   assert(options.file != NULL);
   assert(!(options.flags & ~(UV_PROCESS_WINDOWS_VERBATIM_ARGUMENTS |
+                             UV_PROCESS_NO_WINDOW |
                              UV_PROCESS_DETACHED |
                              UV_PROCESS_SETGID |
                              UV_PROCESS_SETUID)));
@@ -857,6 +858,9 @@ int uv_spawn(uv_loop_t* loop, uv_process_t* process,
   process_flags = CREATE_UNICODE_ENVIRONMENT;
   if (options.flags & UV_PROCESS_DETACHED) {
     process_flags |= DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+  }
+  if (options.flags & UV_PROCESS_NO_WINDOW) {
+    process_flags |= CREATE_NO_WINDOW;
   }
 
   if (CreateProcessW(application_path,

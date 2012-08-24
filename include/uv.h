@@ -1297,7 +1297,12 @@ enum uv_process_flags {
    * parent's event loop alive unless the parent process calls uv_unref() on
    * the child's process handle.
    */
-  UV_PROCESS_DETACHED = (1 << 3)
+  UV_PROCESS_DETACHED = (1 << 3),
+  /*
+   * Spawn the child without a GUI window.  This option is only meaningful on
+   * windows systems.  On unix it is silently ignored.
+   */
+  UV_PROCESS_NO_WINDOW = (1 << 4)
 };
 
 /*
