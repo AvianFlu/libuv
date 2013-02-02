@@ -34,6 +34,7 @@
 #include <net/if.h>
 
 #include <sys/loadavg.h>
+#include <sys/pset.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <kstat.h>
@@ -269,7 +270,7 @@ uint64_t uv_get_total_memory(void) {
 
 
 void uv_loadavg(double avg[3]) {
-  (void) getloadavg(avg, 3);
+  (void) pset_getloadavg(PS_MYID, avg, 3);
 }
 
 
